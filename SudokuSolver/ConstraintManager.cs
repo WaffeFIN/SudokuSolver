@@ -90,6 +90,7 @@ public static class ConstraintManager
         { typeof(DisjointGroupConstraint), (solver, options) => new DisjointGroupConstraint(solver, options) },
         { typeof(EvenConstraint), (solver, options) => new EvenConstraint(solver, options) },
         { typeof(ExtraRegionConstraint), (solver, options) => new ExtraRegionConstraint(solver, options) },
+        { typeof(GreaterSumConstraint), (solver, options) => new GreaterSumConstraint(solver, options) },
         { typeof(RowIndexerConstraint), (solver, options) => new RowIndexerConstraint(solver, options) },
         { typeof(ColIndexerConstraint), (solver, options) => new ColIndexerConstraint(solver, options) },
         { typeof(BoxIndexerConstraint), (solver, options) => new BoxIndexerConstraint(solver, options) },
@@ -102,6 +103,7 @@ public static class ConstraintManager
         { typeof(MinimumConstraint), (solver, options) => new MinimumConstraint(solver, options) },
         { typeof(OddConstraint), (solver, options) => new OddConstraint(solver, options) },
         { typeof(PalindromeConstraint), (solver, options) => new PalindromeConstraint(solver, options) },
+        { typeof(ProximityConstraint), (solver, options) => new ProximityConstraint(solver, options) },
         { typeof(QuadrupleConstraint), (solver, options) => new QuadrupleConstraint(solver, options) },
         { typeof(RatioConstraint), (solver, options) => new RatioConstraint(solver, options) },
         { typeof(RegionSumLinesConstraint), (solver, options) => new RegionSumLinesConstraint(solver, options) },
@@ -114,7 +116,6 @@ public static class ConstraintManager
         { typeof(TaxicabConstraint), (solver, options) => new TaxicabConstraint(solver, options) },
         { typeof(ThermometerConstraint), (solver, options) => new ThermometerConstraint(solver, options) },
         { typeof(WhispersConstraint), (solver, options) => new WhispersConstraint(solver, options) },
-        { typeof(GreaterSumConstraint), (solver, options) => new GreaterSumConstraint(solver, options) },
     };
 
     private static readonly Dictionary<Type, Func<Solver, string, IConstraintGroup>> constraintGroupTypeConstructors = new()
