@@ -40,7 +40,10 @@ public class ProximityConstraint : Constraint
 
             result = result == LogicResult.None ? change : result;
         }
-        return result;
+
+        var result2 = RemoveCandidatesFromAntiCells(solver);
+
+        return result2 == LogicResult.None ? result : result2;
     }
 
     private LogicResult RemoveCandidates(Solver solver, int antiCellX, int antiCellY)
@@ -69,15 +72,65 @@ public class ProximityConstraint : Constraint
                     continue;
                 }
                 var newMask = mask & ~antiCellMask;
-                if (newMask != mask)
-                {
-                    result = LogicResult.Changed;
-                }
                 if (newMask == 0)
                 {
                     return LogicResult.Invalid;
                 }
-                solver.Board[antiCellX + dx, antiCellY + dy] = newMask;
+                if (newMask != mask)
+                {
+                    result = LogicResult.Changed;
+                    solver.Board[antiCellX + dx, antiCellY + dy] = newMask;
+                }
+            }
+        }
+        return result;
+    }
+
+    private LogicResult RemoveCandidatesFromAntiCells(Solver solver)
+    {
+        var result = LogicResult.None;
+        for (var x = 0; x < solver.WIDTH; x++)
+        {
+            for (var y = 0; y < solver.HEIGHT; y++)
+            {
+                var mask = solver.Board[x, y];
+                if (SolverUtility.IsValueSet(mask) && !antiCellsSet.Contains((x, y)))
+                {
+                    var newResult = RemoveCandidatesFromAntiCells(solver, x, y, mask);
+                    result = result > newResult ? result : newResult;
+                }
+            }
+        }
+        return result;
+    }
+
+    private LogicResult RemoveCandidatesFromAntiCells(Solver solver, int cellX, int cellY, uint cellMask)
+    {
+        var result = LogicResult.None;
+        for (int dx = -PROXIMITY_DISTANCE; dx <= PROXIMITY_DISTANCE; dx++)
+        {
+            for (int dy = -PROXIMITY_DISTANCE; dy <= PROXIMITY_DISTANCE; dy++)
+            {
+                if (dx == 0 && dy == 0
+                    || cellX + dx < 0 || cellX + dx >= solver.WIDTH
+                    || cellY + dy < 0 || cellY + dy >= solver.HEIGHT
+                    || !antiCellsSet.Contains((cellX + dx, cellY + dy)))
+                {
+                    continue;
+                }
+
+                var antiCellMask = solver.Board[cellX + dx, cellY + dy] & ~SolverUtility.valueSetMask;
+
+                var newMask = ~cellMask & antiCellMask;
+                if (newMask == 0)
+                {
+                    return LogicResult.Invalid;
+                }
+                if (newMask != antiCellMask)
+                {
+                    result = LogicResult.Changed;
+                    solver.Board[cellX + dx, cellY + dy] = newMask;
+                }
             }
         }
         return result;
@@ -102,11 +155,11 @@ public class ProximityConstraint : Constraint
     public override bool EnforceConstraint(Solver solver, int i, int j, int val)
     {
         return antiCellsSet.Contains((i, j)) ?
-            EnforceAntiCellConstraint(solver, i, j, SolverUtility.ValueMask(val)) :
-            EnforceCellConstraint(solver, i, j, SolverUtility.ValueMask(val));
+            EnforceAntiCellConstraint(solver, i, j, val) :
+            EnforceCellConstraint(solver, i, j, val);
     }
 
-    private bool EnforceAntiCellConstraint(Solver solver, int antiCellX, int antiCellY, uint antiCellMask)
+    private bool EnforceAntiCellConstraint(Solver solver, int antiCellX, int antiCellY, int antiCellValue)
     {
         // check that antiCell does not have a partner in proximity
         for (int dx = -PROXIMITY_DISTANCE; dx <= PROXIMITY_DISTANCE; dx++)
@@ -122,7 +175,7 @@ public class ProximityConstraint : Constraint
 
                 var mask = solver.Board[antiCellX + dx, antiCellY + dy];
 
-                if ((mask & ~antiCellMask) == 0)
+                if (SolverUtility.IsValueSet(mask) && SolverUtility.GetValue(mask) == antiCellValue)
                 {
                     return false;
                 }
@@ -131,8 +184,31 @@ public class ProximityConstraint : Constraint
         return true;
     }
 
-    private bool EnforceCellConstraint(Solver solver, int cellX, int cellY, uint cellMask)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private uint MaskFromVal(int val)
     {
+        return 1u << (val - 1);
+    }
+
+    private bool EnforceCellConstraint(Solver solver, int cellX, int cellY, int cellValue)
+    {
+        // check that no anti cells are in proximity
+        for (int dx = -PROXIMITY_DISTANCE; dx <= PROXIMITY_DISTANCE; dx++)
+        {
+            for (int dy = -PROXIMITY_DISTANCE; dy <= PROXIMITY_DISTANCE; dy++)
+            {
+                if (antiCellsSet.Contains((cellX + dx, cellY + dy)))
+                {
+                    var antiCellMask = solver.Board[cellX + dx, cellY + dy];
+                    if (SolverUtility.IsValueSet(antiCellMask) && SolverUtility.GetValue(antiCellMask) == cellValue)
+                    {
+                        // Sees anti cell
+                        return false;
+                    }
+                }
+            }
+        }
+
         // check that cell has at least one possible partner in proximity
         for (int dx = -PROXIMITY_DISTANCE; dx <= PROXIMITY_DISTANCE; dx++)
         {
@@ -147,7 +223,7 @@ public class ProximityConstraint : Constraint
 
                 var mask = solver.Board[cellX + dx, cellY + dy];
 
-                if ((mask & cellMask) != 0)
+                if ((mask & MaskFromVal(cellValue)) != 0)
                 {
                     // Found one
                     return true;
@@ -159,6 +235,11 @@ public class ProximityConstraint : Constraint
 
     public override LogicResult StepLogic(Solver solver, StringBuilder logicalStepDescription, bool isBruteForcing)
     {
+        if (!IsValid(solver))
+        {
+            logicalStepDescription?.Append($"Proximity constraint broken");
+            return LogicResult.Invalid;
+        }
         var result = RemoveCandidates(solver); // TODO: No need to loop through them all each step
         if (result != LogicResult.None)
         {
@@ -166,7 +247,7 @@ public class ProximityConstraint : Constraint
             return result;
         }
 
-        return isBruteForcing ? LogicResult.None : CheckUnorthodoxHiddenSingles(solver, logicalStepDescription);
+        return CheckUnorthodoxHiddenSingles(solver, logicalStepDescription);
     }
 
     private LogicResult CheckUnorthodoxHiddenSingles(Solver solver, StringBuilder logicalStepDescription)
@@ -183,7 +264,7 @@ public class ProximityConstraint : Constraint
                 var mask = solver.Board[x, y];
                 if (SolverUtility.IsValueSet(mask))
                 {
-                    var hiddenSinglesResult = CheckUnorthodoxHiddenSingles(solver, x, y, mask & ~SolverUtility.valueSetMask);
+                    var hiddenSinglesResult = CheckUnorthodoxHiddenSingle(solver, x, y, mask & ~SolverUtility.valueSetMask);
                     if (hiddenSinglesResult.result == LogicResult.Invalid)
                     {
                         logicalStepDescription?.Append($"Cell at {SolverUtility.CellName((x, y))} has no possible partner in proximity");
@@ -192,9 +273,23 @@ public class ProximityConstraint : Constraint
                     if (hiddenSinglesResult.result == LogicResult.Changed)
                     {
                         var value = SolverUtility.GetValue(mask);
-                        logicalStepDescription?.Append($"Unorthodox hidden single {value} at {SolverUtility.CellName(hiddenSinglesResult.cell.Value)}");
-                        solver.Board[hiddenSinglesResult.cell.Value.Item1, hiddenSinglesResult.cell.Value.Item2] = mask & ~SolverUtility.valueSetMask;
-                        return LogicResult.Changed;
+
+                        logicalStepDescription?.Append(
+                            result != LogicResult.Changed
+                            ? $"Unorthodox hidden single(s) {value} at {SolverUtility.CellName(hiddenSinglesResult.cell.Value)}"
+                            : $", {value} at {SolverUtility.CellName(hiddenSinglesResult.cell.Value)}"
+                        );
+
+
+                        if (!solver.SetValue(
+                            hiddenSinglesResult.cell.Value.Item1,
+                            hiddenSinglesResult.cell.Value.Item2,
+                            value))
+                        {
+                            logicalStepDescription?.Append($"Unable to place unorthodox hidden single {value} at {SolverUtility.CellName(hiddenSinglesResult.cell.Value)}");
+                            return LogicResult.Invalid;
+                        }
+                        result = LogicResult.Changed;
                     }
                 }
             }
@@ -208,7 +303,7 @@ public class ProximityConstraint : Constraint
         internal LogicResult result;
     }
 
-    private UnorthodoxSingleResult CheckUnorthodoxHiddenSingles(Solver solver, int cellX, int cellY, uint cellValueMask)
+    private UnorthodoxSingleResult CheckUnorthodoxHiddenSingle(Solver solver, int cellX, int cellY, uint cellValueMask)
     {
         (int, int)? found = null;
         // check that cell has at least one possible partner in proximity
@@ -218,7 +313,8 @@ public class ProximityConstraint : Constraint
             {
                 if (dx == 0 && dy == 0
                     || cellX + dx < 0 || cellX + dx >= solver.WIDTH
-                    || cellY + dy < 0 || cellY + dy >= solver.HEIGHT)
+                    || cellY + dy < 0 || cellY + dy >= solver.HEIGHT
+                    || antiCellsSet.Contains((cellX + dx, cellY + dy))) // We can't place a hidden single in an anti cell
                 {
                     continue;
                 }
@@ -227,28 +323,17 @@ public class ProximityConstraint : Constraint
 
                 if ((mask & cellValueMask) != 0)
                 {
-                    if (SolverUtility.IsValueSet(mask))
+                    if (SolverUtility.IsValueSet(mask) || found != null)
                     {
-                        // Cell is already connected, no unorthodox hidden singles can be deduced
+                        // Either: Cell is already connected, no unorthodox hidden singles can be deduced
+                        // Or: we found two+ candidates
                         return new UnorthodoxSingleResult
                         {
                             cell = null,
                             result = LogicResult.None
                         };
                     }
-                    if (found == null)
-                    {
-                        // Found one
-                        found = ((cellX + dx, cellY + dy));
-                    }
-                    else
-                    {
-                        // Found two+
-                        return new UnorthodoxSingleResult {
-                            cell = null,
-                            result = LogicResult.None
-                        };
-                    }
+                    found = ((cellX + dx, cellY + dy));
                 }
             }
         }
