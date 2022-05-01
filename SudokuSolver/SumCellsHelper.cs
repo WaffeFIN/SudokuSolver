@@ -404,6 +404,7 @@ public class SumCellsHelper
         if (groupIndex == groups.Count)
         {
             yield return 0;
+            yield break;
         }
 
         var group = groups[groupIndex];
